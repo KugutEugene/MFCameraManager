@@ -55,9 +55,9 @@ class FocusMarker: CALayer {
                           height: self.size.height))
 
         // Focus
-        for i in 0..<4 {
+        for index in 0..<4 {
             var endPoint: CGPoint
-            switch i {
+            switch index {
             case 0:
                 ctx.move(to: CGPoint(x: self.point.x, y: self.point.y - self.size.height / 2.0))
                 endPoint = CGPoint(x: self.point.x, y: self.point.y - self.size.height / 2.0 + self.sight)

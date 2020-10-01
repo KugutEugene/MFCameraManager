@@ -17,7 +17,7 @@ open class CameraManager: NSObject {
 
     // MARK: - Private Variables
     /// getting the device orientation to change the final image orientation
-    private var imageOrientation: UIImageOrientation {
+    private var imageOrientation: UIImage.Orientation {
         let currentDevice: UIDevice = UIDevice.current
         let orientation: UIDeviceOrientation = currentDevice.orientation
         if self.cameraPosition == .back {
@@ -57,7 +57,8 @@ open class CameraManager: NSObject {
 
     //Private variables that cannot be accessed by other classes in any way.
     /// view data output
-    fileprivate var stillImageOutput: AVCaptureStillImageOutput!
+    fileprivate var photoOutput: AVCapturePhotoOutput!
+    //fileprivate var stillImageOutput: AVCaptureStillImageOutput!
     /// camera session
     fileprivate var captureSession: AVCaptureSession!
 
@@ -146,7 +147,26 @@ open class CameraManager: NSObject {
      
      */
     open func enableTorchMode(level: Float? = 1) {
-        for testedDevice in AVCaptureDevice.devices(for: AVMediaType.video) {
+        let testDevices: [AVCaptureDevice]
+        if #available(iOS 13.0, *) {
+            testDevices = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInDualCamera,
+                                                                         .builtInTripleCamera,
+                                                                         .builtInTelephotoCamera,
+                                                                         .builtInDualWideCamera,
+                                                                         .builtInWideAngleCamera,
+                                                                         .builtInUltraWideCamera,
+                                                                         .builtInTrueDepthCamera],
+                                                           mediaType: .video,
+                                                           position: .back).devices
+        } else {
+            testDevices = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInDualCamera,
+                                                                         .builtInTelephotoCamera,
+                                                                         .builtInWideAngleCamera,
+                                                                         .builtInTrueDepthCamera],
+                                                           mediaType: .video,
+                                                           position: .back).devices
+        }
+        for testedDevice in testDevices {
             if (testedDevice as AnyObject).position == AVCaptureDevice.Position.back
                 && self.cameraPosition == .back {
                 let currentDevice = testedDevice
@@ -174,31 +194,23 @@ open class CameraManager: NSObject {
     ///   - rect: CGRect to cropp the image inside it.
     ///   - completionHandler: block code which has the UIImage
     ///     and any error of getting image out of data representation.
+
+    private var onGetImageCompletion: MFCameraMangerCompletion?
+    private var imageRect: CGRect?
+
     open func getImage(croppWith rect: CGRect? = nil,
                        completion: @escaping MFCameraMangerCompletion) {
-        guard let videoConnection = stillImageOutput?.connection(with: .video) else {
+
+        guard photoOutput?.connection(with: .video) != nil else {
             completion(nil, MFCameraError.noVideoConnection)
             return
         }
 
-        stillImageOutput?
-            .captureStillImageAsynchronously(from: videoConnection) { (imageDataSampleBuffer, error) -> Void in
-                guard let imageDataSampleBuffer = imageDataSampleBuffer,
-                    let imageData = AVCaptureStillImageOutput.jpegStillImageNSDataRepresentation(imageDataSampleBuffer),
-                    let capturedImage: UIImage = UIImage(data: imageData) else {
-                        completion(nil, MFCameraError.noImageCapture)
-                        return
-                }
-                // The image returned in initialImageData will be larger than what
-                //  is shown in the AVCaptureVideoPreviewLayer, so we need to crop it.
-                do {
-                    let croppedImage = try self.crop(image: capturedImage,
-                                                     withRect: rect ?? self.cameraView?.frame ?? .zero)
-                    completion(croppedImage, error)
-                } catch {
-                    completion(nil, error)
-                }
-        }
+        imageRect = rect
+        onGetImageCompletion = completion
+
+        photoOutput?.capturePhoto(with: AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg]),
+                                  delegate: self)
     }
 
     func crop(image: UIImage, withRect rect: CGRect) throws -> UIImage {
@@ -207,8 +219,8 @@ open class CameraManager: NSObject {
         guard let metaRect = previewLayer?.metadataOutputRectConverted(fromLayerRect: rect) else {
             throw MFCameraError.noMetaRect
         }
-        if image.imageOrientation == UIImageOrientation.left
-            || image.imageOrientation == UIImageOrientation.right {
+        if image.imageOrientation == UIImage.Orientation.left
+            || image.imageOrientation == UIImage.Orientation.right {
             // For these images (which are portrait), swap the size of the
             // image, because here the output image is actually rotated
             // relative to what you see on screen.
@@ -218,11 +230,11 @@ open class CameraManager: NSObject {
             originalSize = image.size
         }
 
-        let x = metaRect.origin.x * originalSize.width
-        let y = metaRect.origin.y * originalSize.height
+        let xPosition = metaRect.origin.x * originalSize.width
+        let yPosition = metaRect.origin.y * originalSize.height
         // metaRect is fractional, that's why we multiply here.
-        let cropRect: CGRect = CGRect( x: x,
-                                       y: y,
+        let cropRect: CGRect = CGRect( x: xPosition,
+                                       y: yPosition,
                                        width: metaRect.size.width * originalSize.width,
                                        height: metaRect.size.height * originalSize.height).integral
         guard let cropedCGImage = image.cgImage?.cropping(to: cropRect) else {
@@ -270,31 +282,52 @@ open class CameraManager: NSObject {
         let deviceInput = try AVCaptureDeviceInput(device: captureDevice)
 
         //Output
-        stillImageOutput = AVCaptureStillImageOutput()
-        stillImageOutput.outputSettings = [AVVideoCodecKey: AVVideoCodecJPEG]
+        photoOutput = AVCapturePhotoOutput()
         if captureSession.canAddInput(deviceInput) {
             captureSession.addInput(deviceInput)
         }
 
-        if captureSession.canAddOutput(stillImageOutput) {
-            captureSession.addOutput(stillImageOutput)
+        if captureSession.canAddOutput(photoOutput) {
+            captureSession.addOutput(photoOutput)
         }
 
-        //To get the highest quality of bufferData add below code
-        //        captureSession.sessionPreset = AVCaptureSessionPresetPhoto
-
-        previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+        let previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+        self.previewLayer = previewLayer
         if let cameraView = cameraView {
-            previewLayer?.frame = cameraView.bounds
+            self.previewLayer?.frame = cameraView.bounds
         }
 
-        previewLayer?.videoGravity = AVLayerVideoGravity.resizeAspectFill
+        self.previewLayer?.videoGravity = AVLayerVideoGravity.resizeAspectFill
         cameraView?.layer.addSublayer(previewLayer)
 
         //to detect orientation of device and to show the AVCapture as the orientation is
         previewLayer.connection?.videoOrientation = UIDevice.current.orientation.avCaptureVideoOrientation
         self.captureSession.startRunning()
 
+    }
+
+}
+
+extension CameraManager: AVCapturePhotoCaptureDelegate {
+
+    public func photoOutput(_ output: AVCapturePhotoOutput,
+                            didFinishProcessingPhoto photo: AVCapturePhoto,
+                            error: Error?) {
+
+        guard let imageData = photo.fileDataRepresentation(),
+           let capturedImage: UIImage = UIImage(data: imageData) else {
+            onGetImageCompletion?(nil, MFCameraError.noImageCapture)
+            return
+        }
+        // The image returned in initialImageData will be larger than what
+        //  is shown in the AVCaptureVideoPreviewLayer, so we need to crop it.
+        do {
+            let croppedImage = try self.crop(image: capturedImage,
+                                             withRect: imageRect ?? self.cameraView?.frame ?? .zero)
+            onGetImageCompletion?(croppedImage, error)
+        } catch {
+            onGetImageCompletion?(nil, error)
+        }
     }
 
 }

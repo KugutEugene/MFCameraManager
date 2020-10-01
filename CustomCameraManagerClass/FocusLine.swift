@@ -33,21 +33,21 @@ class FocusLine: CALayer {
         ctx.setLineWidth(self.strokeWidth)
 
         for corners in self.corners {
-            for i in 0...corners.count {
-                var idx = i
-                if i == corners.count {
+            for index in 0...corners.count {
+                var idx = index
+                if index == corners.count {
                     idx = 0
                 }
 
                 if let dict = corners[idx] as? NSDictionary,
                     let rawXPosition = dict.object(forKey: "X") as? NSNumber,
                     let rawYPosition = dict.object(forKey: "Y") as? NSNumber {
-                    let x = CGFloat(truncating: rawXPosition)
-                    let y = CGFloat(truncating: rawYPosition)
-                    if i == 0 {
-                        ctx.move(to: CGPoint(x: x, y: y))
+                    let xPosition = CGFloat(truncating: rawXPosition)
+                    let yPosition = CGFloat(truncating: rawYPosition)
+                    if index == 0 {
+                        ctx.move(to: CGPoint(x: xPosition, y: yPosition))
                     } else {
-                        ctx.addLine(to: CGPoint(x: x, y: y))
+                        ctx.addLine(to: CGPoint(x: xPosition, y: yPosition))
                     }
                 }
             }
